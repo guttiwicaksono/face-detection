@@ -1,0 +1,25 @@
+{
+  "name": "face-detection-web",
+  "version": "1.0.0",
+  "description": "Face Detection",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "google-cloud",
+    "video-intelligence",
+    "face-detection",
+    "nodejs"
+  ],
+  "author": "The Author",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/storage": "^7.16.0",
+    "@google-cloud/video-intelligence": "^5.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "multer": "^2.0.1"
+  }
+}
