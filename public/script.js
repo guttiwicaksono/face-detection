@@ -75,7 +75,8 @@ class FaceDetectionApp {
 
     handleFile(file) {
         // Validate file type
-        const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv', 'video/wmv', 'video/x-flv', 'video/webm'];
+        
+        const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv', 'video/wmv', 'video/x-flv', 'video/webm', 'video/quicktime'];
         if (!allowedTypes.includes(file.type)) {
             this.showError('Please select a valid video file (MP4, AVI, MOV, MKV, WMV, FLV, WEBM)');
             return;

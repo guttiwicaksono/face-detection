@@ -15,7 +15,6 @@
   "author": "The Author",
   "license": "ISC",
   "dependencies": {
-    "@google-cloud/storage": "^7.16.0",
     "@google-cloud/video-intelligence": "^5.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

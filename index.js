@@ -9,7 +9,6 @@ const path = require('path');
 
 // --- Google Cloud Client Libraries ---
 const { VideoIntelligenceServiceClient } = require('@google-cloud/video-intelligence');
-const { Storage } = require('@google-cloud/storage');
 
 // --- Instantiate Google Cloud Clients ---
 const videoIntelligenceClient = new VideoIntelligenceServiceClient({
@@ -27,30 +26,7 @@ const videoIntelligenceClient = new VideoIntelligenceServiceClient({
         "client_x509_cert_url": process.env.GCS_CLIENT_X509_CERT_URL,
     }
 });
-const storage = new Storage({
-    projectId:process.env.GCS_PROJECT_ID,
-    credentials: {
-        "type": process.env.GCS_TYPE,
-        "project_id": process.env.GCS_PROJECT_ID,
-        "private_key_id": process.env.GCS_PRIVATE_KEY_ID,
-        "private_key": process.env.GCS_PRIVATE_KEY,
-        "client_email": process.env.GCS_CLIENT_EMAIL,
-        "client_id": process.env.GCS_CLIENT_ID,
-        "auth_uri": process.env.GCS_AUTH_URI,
-        "token_uri": process.env.GCS_TOKEN_URI,
-        "auth_provider_x509_cert_url": process.env.GCS_AUTH_PROVIDER_X509_CERT_URL,
-        "client_x509_cert_url": process.env.GCS_CLIENT_X509_CERT_URL,
-    }
-}
-);
 
-// --- Environment Variable Validation ---
-const bucketName = process.env.GCS_BUCKET_NAME;
-if (!bucketName || bucketName === 'your-gcs-bucket-name') {
-  console.error('ERROR: GCS_BUCKET_NAME is not set. Please update the .env file.');
-  process.exit(1);
-}
-const bucket = storage.bucket(bucketName);
 const PORT = process.env.PORT || 3000;
 
 // --- Express App and Middleware Setup ---
@@ -72,11 +48,11 @@ const upload = multer({
 });
 
 // The core face detection function remains the same
-async function analyzeVideoFaces(gcsUri) {
-//   console.log(`Analyzing video at: ${gcsUri}`);
+async function analyzeVideoFaces(videoBuffer) {
+  console.log(`Analyzing video from buffer...`);
 
   const request = {
-    inputUri: gcsUri,
+    inputContent: videoBuffer,
     features: ['FACE_DETECTION'],
     videoContext: {
       faceDetectionConfig: {
@@ -101,7 +77,7 @@ async function analyzeVideoFaces(gcsUri) {
 
     if (!faceAnnotations || faceAnnotations.length === 0) {
       console.log('No faces found in the video.');
-      return;
+      return { faceAnnotations: [], thumbnails: [] };
     }
 
     console.log('Found faces:');
@@ -172,54 +148,32 @@ async function analyzeVideoFaces(gcsUri) {
 }
 
 // --- API Endpoint Definition ---
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('video'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).send({ message: 'No file uploaded. Please use the "video" field.' });
+    return res.status(400).json({ message: 'No file uploaded. Please use the "video" field.' });
   }
 
-  console.log('req', req.file.filename);
-  
+  try {
+    console.log(`Received file: ${req.file.originalname}`);
 
-  // Create a unique filename for the GCS blob
-  const blob = bucket.file(Date.now() + path.extname(req.file.originalname));
-  const blobStream = blob.createWriteStream({
-    resumable: false,
-  });
+    // Asynchronously start the long-running video analysis from the buffer
+    const analysisResult = await analyzeVideoFaces(req.file.buffer);
 
-  blobStream.on('error', err => {
-    console.error('GCS Upload Error:', err);
-    res.status(500).send({ message: 'Could not upload the file to GCS.', error: err.message });
-  });
+    if (!analysisResult || !analysisResult.thumbnails || analysisResult.thumbnails.length === 0) {
+      return res.status(200).json({
+        message: 'Analysis complete. No faces were detected in the video.',
+        thumbnails: []
+      });
+    }
 
-  blobStream.on('finish', async () => {
-    const gcsUri = `gs://${bucket.name}/${blob.name}`;
-    console.log(`File successfully uploaded to GCS: ${gcsUri}`);
-
-    // Respond to the client immediately with "Accepted" status
-    
-
-    // Asynchronously start the long-running video analysis
-    const {faceAnnotations, thumbnails} = await analyzeVideoFaces(gcsUri);
-    
-    
-    res.status(200).send({
-      message: `Upload successful. Analysis has been initiated for ${blob.name}. Results will be logged to the server console.`,
-      gcsUri: gcsUri,
-      thumbnail: faceAnnotations[0],
-      image: `data:image/jpeg;base64,${faceAnnotations[0].thumbnail.toString('base64')}`,
-      thumbnails
+    res.status(200).json({
+      message: `Successfully analyzed video and found ${analysisResult.thumbnails.length} face(s).`,
+      thumbnails: analysisResult.thumbnails
     });
-    
-
-    // res.status(200).send({
-    //   message: `Upload successful. Analysis has been initiated for ${blob.name}. Results will be logged to the server console.`,
-    //   gcsUri: gcsUri,
-    //   faceAnnotations:faceAnnotations
-    // });
-  });
-
-  // Pipe the uploaded file's buffer to the GCS write stream
-  blobStream.end(req.file.buffer);
+  } catch (error) {
+    console.error('Analysis Error:', error);
+    res.status(500).json({ message: 'An error occurred during video analysis.', error: error.message });
+  }
 });
 
 // --- Start the Express Server ---
