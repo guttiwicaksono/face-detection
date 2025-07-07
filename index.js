@@ -6,9 +6,11 @@ const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
+const jimp = require('jimp');
 
 // --- Google Cloud Client Libraries ---
 const { VideoIntelligenceServiceClient } = require('@google-cloud/video-intelligence');
+const { ImageAnnotatorClient } = require('@google-cloud/vision');
 
 // --- Instantiate Google Cloud Clients ---
 const videoIntelligenceClient = new VideoIntelligenceServiceClient({
@@ -24,7 +26,23 @@ const videoIntelligenceClient = new VideoIntelligenceServiceClient({
         "token_uri": process.env.GCS_TOKEN_URI,
         "auth_provider_x509_cert_url": process.env.GCS_AUTH_PROVIDER_X509_CERT_URL,
         "client_x509_cert_url": process.env.GCS_CLIENT_X509_CERT_URL,
-    }
+    },
+});
+
+const imageAnnotatorClient = new ImageAnnotatorClient({
+    projectId:process.env.GCS_PROJECT_ID,
+    credentials: {
+        "type": process.env.GCS_TYPE,
+        "project_id": process.env.GCS_PROJECT_ID,
+        "private_key_id": process.env.GCS_PRIVATE_KEY_ID,
+        "private_key": process.env.GCS_PRIVATE_KEY,
+        "client_email": process.env.GCS_CLIENT_EMAIL,
+        "client_id": process.env.GCS_CLIENT_ID,
+        "auth_uri": process.env.GCS_AUTH_URI,
+        "token_uri": process.env.GCS_TOKEN_URI,
+        "auth_provider_x509_cert_url": process.env.GCS_AUTH_PROVIDER_X509_CERT_URL,
+        "client_x509_cert_url": process.env.GCS_CLIENT_X509_CERT_URL,
+    },
 });
 
 const PORT = process.env.PORT || 3000;
@@ -47,19 +65,61 @@ const upload = multer({
   },
 });
 
+/**
+ * Analyzes faces in a static image using the Google Vision API.
+ * @param {Buffer} imageBuffer The buffer of the image file.
+ * @returns {Promise<object>} An object containing annotations and generated thumbnails.
+ */
+async function analyzeImageFaces(imageBuffer) {
+  console.log('Analyzing image from buffer...');
+  const [result] = await imageAnnotatorClient.faceDetection({
+    image: { content: imageBuffer },
+  });
+  const faceAnnotations = result.faceAnnotations;
+
+  if (!faceAnnotations || faceAnnotations.length === 0) {
+    console.log('No faces found in the image.');
+    return { faceAnnotations: [], thumbnails: [], objectAnnotations: [] };
+  }
+
+  console.log(`Found ${faceAnnotations.length} face(s) in the image.`);
+
+  const image = await jimp.read(imageBuffer);
+  const thumbnails = [];
+
+  for (const face of faceAnnotations) {
+    // The Vision API provides a bounding polygon for the face.
+    const vertices = face.boundingPoly.vertices;
+    const x = vertices[0].x;
+    const y = vertices[0].y;
+    const width = vertices[2].x - x;
+    const height = vertices[2].y - y;
+
+    // Create a thumbnail by cropping the face from the original image.
+    const faceThumbnail = image.clone().crop(x, y, width, height);
+    const thumbnailBuffer = await faceThumbnail.getBufferAsync(jimp.MIME_JPEG);
+    thumbnails.push({
+      src: `data:image/jpeg;base64,${thumbnailBuffer.toString('base64')}`
+    });
+  }
+
+  // The Vision API's faceDetection doesn't include object tracking, so we return an empty array.
+  return { faceAnnotations, thumbnails, objectAnnotations: [] };
+}
+
 // The core face detection function remains the same
 async function analyzeVideoFaces(videoBuffer) {
   console.log(`Analyzing video from buffer...`);
 
   const request = {
     inputContent: videoBuffer,
-    features: ['FACE_DETECTION'],
+    features: ['FACE_DETECTION','OBJECT_TRACKING'],
     videoContext: {
       faceDetectionConfig: {
         // Set to true to include bounding-box info
         includeBoundingBoxes: true,
         // Set to true to include attributes like glasses, smiling, etc.
-        includeAttributes: true,
+        includeAttributes: false,
       },
     },
   };
@@ -74,6 +134,7 @@ async function analyzeVideoFaces(videoBuffer) {
 
     // Gets annotations for video
     const faceAnnotations = operationResult.annotationResults[0].faceDetectionAnnotations;
+    const objectAnnotations = operationResult.annotationResults[0].objectAnnotations;
 
     if (!faceAnnotations || faceAnnotations.length === 0) {
       console.log('No faces found in the video.');
@@ -139,9 +200,7 @@ async function analyzeVideoFaces(videoBuffer) {
         }
     })
     
-    
-
-    return {faceAnnotations, thumbnails}
+    return {faceAnnotations, thumbnails, objectAnnotations}
   } catch (err) {
     console.error('ERROR:', err);
   }
@@ -154,25 +213,38 @@ app.post('/upload', upload.single('video'), async (req, res) => {
   }
 
   try {
-    console.log(`Received file: ${req.file.originalname}`);
+    console.log(`Received file: ${req.file.originalname}, MIME type: ${req.file.mimetype}`);
 
-    // Asynchronously start the long-running video analysis from the buffer
-    const analysisResult = await analyzeVideoFaces(req.file.buffer);
+    let analysisResult;
+    const isVideo = req.file.mimetype.startsWith('video/');
+    const isImage = req.file.mimetype.startsWith('image/');
+
+    if (isVideo) {
+      // Asynchronously start the long-running video analysis from the buffer
+      analysisResult = await analyzeVideoFaces(req.file.buffer);
+    } else if (isImage) {
+      // Analyze the image
+      analysisResult = await analyzeImageFaces(req.file.buffer);
+    } else {
+      return res.status(400).json({ message: `Unsupported file type: ${req.file.mimetype}. Please upload a video or an image.` });
+    }
 
     if (!analysisResult || !analysisResult.thumbnails || analysisResult.thumbnails.length === 0) {
       return res.status(200).json({
-        message: 'Analysis complete. No faces were detected in the video.',
+        message: `Analysis complete. No faces were detected in the ${isImage ? 'image' : 'video'}.`,
         thumbnails: []
       });
     }
 
     res.status(200).json({
-      message: `Successfully analyzed video and found ${analysisResult.thumbnails.length} face(s).`,
-      thumbnails: analysisResult.thumbnails
+      message: `Successfully analyzed ${isImage ? 'image' : 'video'} and found ${analysisResult.thumbnails.length} face(s). Powered by CESA AI`,
+      thumbnails: analysisResult.thumbnails,
+      // Conditionally add objectAnnotations if they exist (they will for video)
+      ...(analysisResult.objectAnnotations && { objectAnnotations: analysisResult.objectAnnotations }),
     });
   } catch (error) {
     console.error('Analysis Error:', error);
-    res.status(500).json({ message: 'An error occurred during video analysis.', error: error.message });
+    res.status(500).json({ message: 'An error occurred during analysis.', error: error.message });
   }
 });
 

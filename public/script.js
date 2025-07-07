@@ -37,7 +37,7 @@ class FaceDetectionApp {
         this.removeFileBtn.addEventListener('click', this.removeFile.bind(this));
 
         // Process button
-        this.processBtn.addEventListener('click', this.processVideo.bind(this));
+        this.processBtn.addEventListener('click', this.processFile.bind(this));
 
         // Download button
         this.downloadBtn.addEventListener('click', this.downloadImage.bind(this));
@@ -75,10 +75,15 @@ class FaceDetectionApp {
 
     handleFile(file) {
         // Validate file type
-        
-        const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv', 'video/wmv', 'video/x-flv', 'video/webm', 'video/quicktime'];
-        if (!allowedTypes.includes(file.type)) {
-            this.showError('Please select a valid video file (MP4, AVI, MOV, MKV, WMV, FLV, WEBM)');
+        const allowedVideoTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv', 'video/wmv', 'video/x-flv', 'video/webm', 'video/quicktime'];
+        // Common image types supported by Google Vision API
+        const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff'];
+
+        const allAllowedTypes = [...allowedVideoTypes, ...allowedImageTypes];
+
+        if (!allAllowedTypes.includes(file.type)) {
+            // A more generic error message
+            this.showError('Unsupported file type. Please upload a valid video (e.g., MP4, MOV) or image (e.g., JPEG, PNG).');
             return;
         }
 
@@ -121,7 +126,7 @@ class FaceDetectionApp {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    async processVideo() {
+    async processFile() {
         if (!this.selectedFile) return;
 
         this.setProcessingState(true);
@@ -166,7 +171,7 @@ class FaceDetectionApp {
             spinner.style.display = 'flex';
             this.processBtn.disabled = true;
         } else {
-            btnText.textContent = 'Process Video';
+            btnText.textContent = 'Process File';
             spinner.style.display = 'none';
             this.processBtn.disabled = false;
         }
@@ -224,4 +229,3 @@ class FaceDetectionApp {
 document.addEventListener('DOMContentLoaded', () => {
     new FaceDetectionApp();
 });
-
