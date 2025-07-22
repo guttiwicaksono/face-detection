@@ -108,8 +108,11 @@ async function analyzeImageFaces(imageBuffer) {
 }
 
 // The core face detection function remains the same
-async function analyzeVideoFaces(videoBuffer) {
+async function analyzeVideoFaces(videoBuffer, startTime, endTime) {
   console.log(`Analyzing video from buffer...`);
+  if (startTime != null && endTime != null) {
+    console.log(`Analyzing video segment from ${startTime}s to ${endTime}s.`);
+  }
 
   const request = {
     inputContent: videoBuffer,
@@ -123,6 +126,20 @@ async function analyzeVideoFaces(videoBuffer) {
       },
     },
   };
+
+  // If start and end times are provided, add a segment to the request
+  if (startTime != null && endTime != null) {
+    request.videoContext.segments = [{
+      startTimeOffset: {
+        seconds: Math.floor(startTime),
+        nanos: Math.round((startTime % 1) * 1e9)
+      },
+      endTimeOffset: {
+        seconds: Math.floor(endTime),
+        nanos: Math.round((endTime % 1) * 1e9)
+      }
+    }];
+  }
 
   try {
     // Detects faces in a video
@@ -220,8 +237,12 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     const isImage = req.file.mimetype.startsWith('image/');
 
     if (isVideo) {
+      // Get start and end times from the request body
+      const startTime = req.body.startTime ? parseFloat(req.body.startTime) : null;
+      const endTime = req.body.endTime ? parseFloat(req.body.endTime) : null;
+
       // Asynchronously start the long-running video analysis from the buffer
-      analysisResult = await analyzeVideoFaces(req.file.buffer);
+      analysisResult = await analyzeVideoFaces(req.file.buffer, startTime, endTime);
     } else if (isImage) {
       // Analyze the image
       analysisResult = await analyzeImageFaces(req.file.buffer);

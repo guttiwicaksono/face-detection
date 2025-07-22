@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Face Detection App</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -55,6 +56,26 @@
                     </div>
                 </div>
 
+                <div class="trimmer-section" id="trimmerSection" style="display: none;">
+                    <video id="videoPreview" controls></video>
+                    <div class="trimmer-controls">
+                        <div class="thumbnail-display-container">
+                            <canvas id="startThumbnailCanvas" class="trim-thumbnail" title="Click to zoom"></canvas>
+                            <span id="startTime" class="time-text">00:00</span>
+                        </div>
+                        <div class="slider-container">
+                            <div id="trimmerSlider"></div>
+                            <div id="thumbnailPreview" class="thumbnail-preview">
+                                <canvas id="thumbnailCanvas"></canvas>
+                            </div>
+                        </div>
+                        <div class="thumbnail-display-container">
+                            <canvas id="endThumbnailCanvas" class="trim-thumbnail" title="Click to zoom"></canvas>
+                            <span id="endTime" class="time-text">00:00</span>
+                        </div>
+                    </div>
+                </div>
+
                 <button class="process-btn" id="processBtn" disabled>
                     <span class="btn-text">Process File</span>
                     <div class="loading-spinner" style="display: none;">
@@ -99,6 +120,12 @@
         </main>
     </div>
 
+    <div id="zoomModal" class="modal">
+        <span class="close-modal" title="Close">&times;</span>
+        <img class="modal-content" id="zoomedImage">
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/15.7.1/nouislider.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
