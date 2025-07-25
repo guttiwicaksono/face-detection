@@ -22,6 +22,7 @@ class FaceDetectionApp {
         this.errorSection = document.getElementById('errorSection');
         this.resultImage = document.getElementById('resultImage');
         this.resultImageContainer = document.getElementById('resultImageContainer');
+        this.resultUngroupedImageContainer = document.getElementById('resultUngruppedImageContainer');
         this.resultMessage = document.getElementById('resultMessage');
         this.downloadBtn = document.getElementById('downloadBtn');
         this.errorMessage = document.getElementById('errorMessage');
@@ -71,6 +72,9 @@ class FaceDetectionApp {
 
         // Video preview events
         this.videoPreview.addEventListener('loadedmetadata', this.handleVideoMetadata.bind(this));
+        this.videoPreview.addEventListener('timeupdate', this.handleVideoTimeUpdate.bind(this));
+        this.videoPreview.addEventListener('play', this.handleVideoPlay.bind(this));
+
 
         // New modal and thumbnail events
         this.closeModalBtn.addEventListener('click', this.closeZoomModal.bind(this));
@@ -227,13 +231,8 @@ class FaceDetectionApp {
             console.log('result', result);
             console.log('response', response);
             
-            
-
-            this.showResults(result.thumbnails, result.message);
-            // if (response.ok && result.success) {
-            // } else {
-            //     this.showError(result.error || 'An error occurred while processing the video');
-            // }
+            // The backend now returns 'faceGroups' which is an array of arrays of similar faces.
+            this.showResults(result.faceGroups, result.message, result.ungroupedFaces);
         } catch (error) {
             console.error('Error:', error);
             this.showError('Network error. Please check your connection and try again.');
@@ -265,27 +264,76 @@ class FaceDetectionApp {
         }
     }
 
-    showResults(images, message) {
-        this.resultImageContainer.innerHTML = ''; // Clear previous results
+    showResults(faceGroups, message, ungroupedFaces) {
+        this.resultImageContainer.innerHTML = '<p>Grouped based on similar faces</p>'; // Clear previous results
+        this.resultUngroupedImageContainer.innerHTML = '<p>All detected faces</p>'; // Clear and re-add title
 
-        images.map(image => {
-            const imgElement = document.createElement('img');
-            imgElement.src = image.src;
-            imgElement.alt = 'Detected faces collage';
-            this.resultImageContainer.appendChild(imgElement);
-        })
+        if (!faceGroups || faceGroups.length === 0) {
+            this.resultMessage.textContent = message;
+            this.resultsSection.style.display = 'block';
+            this.errorSection.style.display = 'none';
+            this.downloadBtn.style.display = 'none'; // Hide download button if no faces
+            this.resultUngroupedImageContainer.style.display = 'none';
+            return;
+        }
+
+        this.downloadBtn.style.display = 'inline-flex';
+
+        if (ungroupedFaces && ungroupedFaces.length > 0) {
+            this.resultUngroupedImageContainer.style.display = 'block';
+            ungroupedFaces.forEach(image => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'result-thumbnail-wrapper';
+                const imgElement = document.createElement('img');
+                imgElement.src = image.src;
+                imgElement.alt = 'Detected face';
+                wrapper.appendChild(imgElement);
+                this.resultUngroupedImageContainer.appendChild(wrapper);
+            });
+        } else {
+            this.resultUngroupedImageContainer.style.display = 'none';
+        }
+
+        faceGroups.forEach(group => {
+            if (group.length > 0) {
+                const representativeFace = group[0]; // Take the first face as the display image
+                const wrapper = document.createElement('div');
+                // Add a class for styling the wrapper, which will contain the image and the badge
+                wrapper.className = 'result-thumbnail-wrapper';
+
+                const imgElement = document.createElement('img');
+                imgElement.src = representativeFace.src;
+                imgElement.alt = 'Detected unique face';
+                
+                // Add a badge to show how many times this face was detected in different angles/frames
+                if (group.length > 1) {
+                    const badge = document.createElement('span');
+                    // Add a class for styling the badge
+                    badge.className = 'thumbnail-badge';
+                    badge.textContent = group.length;
+                    badge.title = `${group.length} similar faces found`;
+                    wrapper.appendChild(badge);
+                }
+
+                wrapper.appendChild(imgElement);
+                this.resultImageContainer.appendChild(wrapper);
+            }
+        });
+
         this.resultMessage.textContent = message;
         this.resultsSection.style.display = 'block';
         this.errorSection.style.display = 'none';
 
-        // Store image data for download
+        // Update download logic to download all unique faces (one per group)
         this.downloadBtn.onclick = () => {
-            images.map(imageData => {
-                const link = document.createElement('a');
-                link.href = imageData.src;
-                link.download = 'detected_faces.png';
-                link.click();
-            })
+            faceGroups.forEach((group, index) => {
+                if (group.length > 0) {
+                    const link = document.createElement('a');
+                    link.href = group[0].src; // Download the representative face of the group
+                    link.download = `unique_face_${index + 1}.png`;
+                    link.click();
+                }
+            });
         };
     }
 
@@ -484,6 +532,39 @@ class FaceDetectionApp {
         this.currentZoom = Math.max(0.5, this.currentZoom + delta); // Min zoom 0.5x
         this.zoomedImage.style.transform = `scale(${this.currentZoom})`;
         this.zoomedImage.style.cursor = delta > 0 ? 'zoom-in' : 'zoom-out';
+    }
+
+    handleVideoTimeUpdate() {
+        if (!this.trimmerSlider.noUiSlider || this.videoPreview.readyState < 1) {
+            return;
+        }
+
+        const [startTime, endTime] = this.trimmerSlider.noUiSlider.get().map(parseFloat);
+        const currentTime = this.videoPreview.currentTime;
+
+        if (currentTime > endTime) {
+            this.videoPreview.pause();
+            this.videoPreview.currentTime = endTime;
+        }
+
+        // This handles seeking to before the start time, but also if the slider start handle is moved
+        // past the current play time.
+        if (currentTime < startTime) {
+            this.videoPreview.currentTime = startTime;
+        }
+    }
+
+    handleVideoPlay() {
+        if (!this.trimmerSlider.noUiSlider || this.videoPreview.readyState < 1) {
+            return;
+        }
+        const [startTime, endTime] = this.trimmerSlider.noUiSlider.get().map(parseFloat);
+
+        // If trying to play from the end, loop back to the start of the trim.
+        // A small tolerance is added to handle floating point inaccuracies.
+        if (this.videoPreview.currentTime >= endTime - 0.1) {
+            this.videoPreview.currentTime = startTime;
+        }
     }
 }
 

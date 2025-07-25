@@ -512,3 +512,40 @@ body {
     transition: color 0.2s;
 }
 .close-modal:hover { color: #bbb; }
+
+/* CSS for the new face grouping feature */
+.result-thumbnail-wrapper {
+  position: relative;
+  display: inline-block;
+  margin: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.result-thumbnail-wrapper img {
+  display: block;
+  width: 120px; /* Or any size you prefer */
+  height: 120px;
+  object-fit: cover;
+}
+
+.thumbnail-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background-color: #e74c3c; /* A nice red color */
+  color: white;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  cursor: default;
+}
+

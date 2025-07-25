@@ -68,10 +68,11 @@ const upload = multer({
 /**
  * Analyzes faces in a static image using the Google Vision API.
  * @param {Buffer} imageBuffer The buffer of the image file.
+ * @param {string} mimeType The MIME type of the image.
  * @returns {Promise<object>} An object containing annotations and generated thumbnails.
  */
-async function analyzeImageFaces(imageBuffer) {
-  console.log('Analyzing image from buffer...');
+async function analyzeImageFaces(imageBuffer, mimeType) {
+  console.log(`Analyzing image from buffer with MIME type: ${mimeType}...`);
   const [result] = await imageAnnotatorClient.faceDetection({
     image: { content: imageBuffer },
   });
@@ -84,6 +85,8 @@ async function analyzeImageFaces(imageBuffer) {
 
   console.log(`Found ${faceAnnotations.length} face(s) in the image.`);
 
+  // Reading from a buffer is more direct and avoids ENAMETOOLONG errors
+  // that can happen if a data URI string is too long.
   const image = await jimp.read(imageBuffer);
   const thumbnails = [];
 
@@ -99,12 +102,103 @@ async function analyzeImageFaces(imageBuffer) {
     const faceThumbnail = image.clone().crop(x, y, width, height);
     const thumbnailBuffer = await faceThumbnail.getBufferAsync(jimp.MIME_JPEG);
     thumbnails.push({
-      src: `data:image/jpeg;base64,${thumbnailBuffer.toString('base64')}`
+      src: `data:image/jpeg;base64,${thumbnailBuffer.toString('base64')}`,
+      buffer: thumbnailBuffer // Keep the buffer for server-side processing
     });
   }
 
   // The Vision API's faceDetection doesn't include object tracking, so we return an empty array.
   return { faceAnnotations, thumbnails, objectAnnotations: [] };
+}
+
+/**
+ * Calculates the Hamming distance between two pHash strings.
+ * This is a fallback for older jimp versions that might not have `pHashDistance`.
+ * @param {string} hash1 - The first perceptual hash.
+ * @param {string} hash2 - The second perceptual hash.
+ * @returns {number} The normalized Hamming distance (0 to 1).
+ */
+function calculatePHashDistance(hash1, hash2) {
+  // The `pHashDistance` function might not exist in all versions of jimp.
+  // This provides a manual fallback.
+  if (typeof jimp.pHashDistance === 'function') {
+    return jimp.pHashDistance(hash1, hash2);
+  }
+
+  // Manual fallback implementation for Hamming distance
+  let distance = 0;
+  const bits = 64; // pHash is a 64-bit hash
+
+  // Convert hex hashes to binary strings, padding with zeros to ensure they are 64 bits long
+  const binary1 = BigInt('0x' + hash1).toString(2).padStart(bits, '0');
+  const binary2 = BigInt('0x' + hash2).toString(2).padStart(bits, '0');
+
+  for (let i = 0; i < bits; i++) {
+    if (binary1[i] !== binary2[i]) {
+      distance++;
+    }
+  }
+
+  return distance / bits;
+}
+
+/**
+ * Groups similar face thumbnails using perceptual hashing.
+ * @param {Array<object>} thumbnails - An array of thumbnail objects, each with a 'src' property (base64 string).
+ * @returns {Promise<Array<Array<object>>>} A promise that resolves to an array of groups, where each group is an array of similar thumbnail objects.
+ */
+async function groupSimilarFaces(thumbnails) {
+  // If there's only one or no face, no need to group. Return it as a single group.
+  if (!thumbnails || thumbnails.length < 2) {
+    return thumbnails.length > 0 ? [thumbnails] : [];
+  }
+
+  console.log(`Grouping ${thumbnails.length} detected faces...`);
+
+  const faceData = [];
+  // Calculate pHash for each thumbnail
+  for (const thumb of thumbnails) {
+    // Use the buffer directly to avoid ENAMETOOLONG errors from long data URIs
+    // and to prevent re-introducing MIME detection errors.
+    if (!thumb.buffer || thumb.buffer.length === 0) {
+      console.warn('Skipping an empty or invalid thumbnail buffer.');
+      continue;
+    }
+    const image = await jimp.read(thumb.buffer);
+    const hash = image.pHash();
+    faceData.push({
+      src: thumb.src,
+      hash: hash,
+    });
+  }
+
+  const groups = [];
+  // A lower threshold makes the matching stricter, reducing the chance of grouping
+  // different people together (false positives). A value of 0.1 means up to 10% of
+  // the hash bits can differ. The previous value of 0.15 was likely too lenient.
+  const pHashThreshold = 0.08;
+
+  for (const face of faceData) {
+    let foundGroup = false;
+    for (const group of groups) {
+      // Compare the current face's hash with the hash of the first face in the group (the representative)
+      const representativeHash = group[0].hash;
+      if (calculatePHashDistance(face.hash, representativeHash) <= pHashThreshold) {
+        group.push(face);
+        foundGroup = true;
+        break;
+      }
+    }
+
+    if (!foundGroup) {
+      // If no similar group is found, create a new group for this face.
+      groups.push([face]);
+    }
+  }
+
+  console.log(`Found ${groups.length} unique face groups.`);
+  // Return an array of groups, where each group is an array of thumbnail objects with only the 'src' property.
+  return groups.map(group => group.map(face => ({ src: face.src })));
 }
 
 // The core face detection function remains the same
@@ -212,8 +306,10 @@ async function analyzeVideoFaces(videoBuffer, startTime, endTime) {
 
 
     const thumbnails = faceAnnotations.map(faceAnnotation => {
+        const buffer = faceAnnotation.thumbnail;
         return {
-            src: `data:image/jpeg;base64,${faceAnnotation.thumbnail.toString('base64')}`
+            src: `data:image/jpeg;base64,${buffer.toString('base64')}`,
+            buffer: buffer // Keep the buffer for server-side processing
         }
     })
     
@@ -245,7 +341,7 @@ app.post('/upload', upload.single('video'), async (req, res) => {
       analysisResult = await analyzeVideoFaces(req.file.buffer, startTime, endTime);
     } else if (isImage) {
       // Analyze the image
-      analysisResult = await analyzeImageFaces(req.file.buffer);
+      analysisResult = await analyzeImageFaces(req.file.buffer, req.file.mimetype);
     } else {
       return res.status(400).json({ message: `Unsupported file type: ${req.file.mimetype}. Please upload a video or an image.` });
     }
@@ -253,13 +349,20 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     if (!analysisResult || !analysisResult.thumbnails || analysisResult.thumbnails.length === 0) {
       return res.status(200).json({
         message: `Analysis complete. No faces were detected in the ${isImage ? 'image' : 'video'}.`,
-        thumbnails: []
+        faceGroups: []
       });
     }
 
+    // Group similar faces to identify unique individuals
+    const faceGroups = await groupSimilarFaces(analysisResult.thumbnails);
+
+    // Prepare thumbnails for the client, sending only the data URI source.
+    const clientThumbnails = analysisResult.thumbnails.map(({ src }) => ({ src }));
+
     res.status(200).json({
-      message: `Successfully analyzed ${isImage ? 'image' : 'video'} and found ${analysisResult.thumbnails.length} face(s). Powered by CESA AI`,
-      thumbnails: analysisResult.thumbnails,
+      message: `Successfully analyzed ${isImage ? 'image' : 'video'} and found ${faceGroups.length} unique face(s) from ${analysisResult.thumbnails.length} total detections. Powered by CESA AI`,
+      faceGroups: faceGroups,
+      ungroupedFaces: clientThumbnails,
       // Conditionally add objectAnnotations if they exist (they will for video)
       ...(analysisResult.objectAnnotations && { objectAnnotations: analysisResult.objectAnnotations }),
     });
