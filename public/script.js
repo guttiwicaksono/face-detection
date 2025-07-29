@@ -274,7 +274,6 @@ class FaceDetectionApp {
             this.errorSection.style.display = 'none';
             this.downloadBtn.style.display = 'none'; // Hide download button if no faces
             this.resultUngroupedImageContainer.style.display = 'none';
-            return;
         }
 
         this.downloadBtn.style.display = 'inline-flex';
@@ -306,14 +305,14 @@ class FaceDetectionApp {
                 imgElement.alt = 'Detected unique face';
                 
                 // Add a badge to show how many times this face was detected in different angles/frames
-                if (group.length > 1) {
-                    const badge = document.createElement('span');
-                    // Add a class for styling the badge
-                    badge.className = 'thumbnail-badge';
-                    badge.textContent = group.length;
-                    badge.title = `${group.length} similar faces found`;
-                    wrapper.appendChild(badge);
-                }
+                // if (group.length > 1) {
+                //     const badge = document.createElement('span');
+                //     // Add a class for styling the badge
+                //     badge.className = 'thumbnail-badge';
+                //     badge.textContent = group.length;
+                //     badge.title = `${group.length} similar faces found`;
+                //     wrapper.appendChild(badge);
+                // }
 
                 wrapper.appendChild(imgElement);
                 this.resultImageContainer.appendChild(wrapper);

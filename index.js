@@ -176,7 +176,7 @@ async function groupSimilarFaces(thumbnails) {
   // A lower threshold makes the matching stricter, reducing the chance of grouping
   // different people together (false positives). A value of 0.1 means up to 10% of
   // the hash bits can differ. The previous value of 0.15 was likely too lenient.
-  const pHashThreshold = 0.08;
+  const pHashThreshold = 0.078;
 
   for (const face of faceData) {
     let foundGroup = false;
