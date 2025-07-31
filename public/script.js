@@ -141,11 +141,11 @@ class FaceDetectionApp {
         }
 
         // Validate file size (100MB limit)
-        const maxSize = 100 * 1024 * 1024; // 100MB
-        if (file.size > maxSize) {
-            this.showError('File size must be less than 100MB');
-            return;
-        }
+        // const maxSize = 100 * 1024 * 1024; // 100MB
+        // if (file.size > maxSize) {
+        //     this.showError('File size must be less than 100MB');
+        //     return;
+        // }
 
         this.selectedFile = file;
         this.displaySelectedFile(file);

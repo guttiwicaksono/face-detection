@@ -60,9 +60,9 @@ app.use(express.static('public'));
 // Configure multer for in-memory file storage to handle uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 100 * 1024 * 1024, // 100 MB file size limit
-  },
+  // limits: {
+  //   fileSize: 100 * 1024 * 1024, // 100 MB file size limit
+  // },
 });
 
 /**
@@ -172,27 +172,49 @@ async function groupSimilarFaces(thumbnails) {
     });
   }
 
-  const groups = [];
-  // A lower threshold makes the matching stricter, reducing the chance of grouping
-  // different people together (false positives). A value of 0.1 means up to 10% of
-  // the hash bits can differ. The previous value of 0.15 was likely too lenient.
-  const pHashThreshold = 0.078;
+  const numFaces = faceData.length;
+  if (numFaces < 2) {
+    return faceData.length > 0 ? [faceData.map(f => ({ src: f.src }))] : [];
+  }
 
-  for (const face of faceData) {
-    let foundGroup = false;
-    for (const group of groups) {
-      // Compare the current face's hash with the hash of the first face in the group (the representative)
-      const representativeHash = group[0].hash;
-      if (calculatePHashDistance(face.hash, representativeHash) <= pHashThreshold) {
-        group.push(face);
-        foundGroup = true;
-        break;
+  // A threshold for perceptual hash distance. A lower value is stricter.
+  // This value may require tuning for best results. A value of 0.125
+  // means that up to 8 bits (out of 64) can be different for two
+  // images to be considered similar. This should provide a good balance
+  // between grouping similar faces and separating different ones.
+  const pHashThreshold = 0.03125;
+
+  // Build adjacency list for the graph of faces
+  const adj = Array(numFaces).fill(0).map(() => []);
+  for (let i = 0; i < numFaces; i++) {
+    for (let j = i + 1; j < numFaces; j++) {
+      const distance = calculatePHashDistance(faceData[i].hash, faceData[j].hash);
+      if (distance <= pHashThreshold) {
+        adj[i].push(j);
+        adj[j].push(i);
       }
     }
+  }
 
-    if (!foundGroup) {
-      // If no similar group is found, create a new group for this face.
-      groups.push([face]);
+  // Find connected components (groups of similar faces) using DFS
+  const visited = Array(numFaces).fill(false);
+  const groups = [];
+
+  function dfs(u, currentGroup) {
+    visited[u] = true;
+    currentGroup.push(faceData[u]);
+    for (const v of adj[u]) {
+      if (!visited[v]) {
+        dfs(v, currentGroup);
+      }
+    }
+  }
+
+  for (let i = 0; i < numFaces; i++) {
+    if (!visited[i]) {
+      const currentGroup = [];
+      dfs(i, currentGroup);
+      groups.push(currentGroup);
     }
   }
 
